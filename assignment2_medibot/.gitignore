@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Project
+.env
+qdrant_local/
+.cache/
+chunks.jsonl
+.pytest_cache/
+.ruff_cache/
+.DS_Store
