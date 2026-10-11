@@ -20,16 +20,20 @@ def request_params(policy: dict[str, Any]) -> dict[str, Any]:
     pii = policy["pii"]
     entities = [{"type": t, "action": "BLOCK"} for t in pii["block"]]
     entities += [{"type": t, "action": "NONE", "inputAction": "NONE", "outputAction": "NONE"} for t in pii["detect"]]
-    return {
+    tier = {"tierConfig": {"tierName": policy.get("tier", "CLASSIC")}}
+    xregion = ({"crossRegionConfig": {"guardrailProfileIdentifier": policy["cross_region_profile"]}}
+               if policy.get("cross_region_profile") else {})
+    return {**xregion,
         "name": policy["name"],
         "description": policy["description"],
         "blockedInputMessaging": policy["blocked_input_message"],
         "blockedOutputsMessaging": policy["blocked_output_message"],
         "topicPolicyConfig": {"topicsConfig": [
             {"name": t["name"], "definition": t["definition"][:200], "examples": [e[:100] for e in t["examples"]][:5],
-             "type": "DENY"} for t in policy["denied_topics"]]},
+             "type": "DENY"} for t in policy["denied_topics"]], **tier},
         "contentPolicyConfig": {"filtersConfig": [
-            {"type": k, "inputStrength": v[0], "outputStrength": v[1]} for k, v in policy["content_filters"].items()]},
+            {"type": k, "inputStrength": v[0], "outputStrength": v[1]} for k, v in policy["content_filters"].items()],
+            **tier},
         "wordPolicyConfig": {"managedWordListsConfig": [{"type": t} for t in policy["managed_word_lists"]]},
         "sensitiveInformationPolicyConfig": {
             "piiEntitiesConfig": entities,
