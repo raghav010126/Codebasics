@@ -1,0 +1,37 @@
+[project]
+name = "medibot"
+version = "0.1.0"
+description = "MediBot: RBAC-aware hybrid RAG + SQL RAG assistant for MediAssist Health Network"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.11.0",
+    "docling>=2.133.0",
+    "fastapi>=0.142.2",
+    "fastembed>=0.8.1",
+    "groq>=1.7.0",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.1",
+    "python-dotenv>=1.2.4",
+    "qdrant-client>=1.19.1",
+    "sentence-transformers>=6.1.0",
+    "streamlit>=1.65.0",
+    "truststore>=0.10.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+medibot = "medibot:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Payload indexes have no effect:UserWarning"]

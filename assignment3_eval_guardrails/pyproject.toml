@@ -1,0 +1,64 @@
+[project]
+name = "mediguard"
+version = "0.1.0"
+description = "Evaluation and guardrail pipeline wrapped around MediBot (Codebasics AI Engineering Bootcamp, assignment 3)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "medibot",
+    "anthropic>=1.11.0",
+    "boto3>=1.40",
+    "botocore[crt]>=1.40",   # credentials from `aws login` sessions
+    "duckdb>=1.3",
+    "jinja2>=3.1",
+    "langchain-anthropic",
+    "langsmith",
+    "openevals",
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "ragas",
+    "streamlit>=1.65",       # chat UI (`make ui`); already installed through MediBot
+]
+
+[project.scripts]
+mediguard = "mediguard.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+medibot = { path = "target/medibot", editable = true }
+
+[tool.uv]
+# Keep MediBot's locked versions so Docling chunking, embeddings and chunk ids match the submitted system.
+constraint-dependencies = [
+    "anthropic>=1.11.0,<2",
+    "docling==2.133.0",
+    "docling-core==2.99.0",
+    "fastembed==0.8.1",
+    "qdrant-client==1.19.1",
+    "sentence-transformers==6.1.0",
+    "transformers==5.18.0",
+    "torch==2.14.1",
+    "tokenizers==0.23.2",
+    "onnxruntime==1.30.0",
+    # ragas 0.4.3 imports langchain_community.chat_models.vertexai, removed in langchain-community 0.4.2
+    "langchain-community==0.4.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["target", ".git", "spikes"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["target"]
