@@ -40,7 +40,8 @@ def request_params(policy: dict[str, Any]) -> dict[str, Any]:
             "regexesConfig": [{"name": r["name"], "pattern": r["pattern"], "action": r["action"]} for r in pii["regexes"]],
         },
         "contextualGroundingPolicyConfig": {"filtersConfig": [
-            {"type": k, "threshold": v} for k, v in policy["contextual_grounding"].items()]},
+            {"type": k, "threshold": v, "action": policy["contextual_grounding"].get("action", "BLOCK")}
+            for k, v in policy["contextual_grounding"].items() if k != "action"]},
     }
 
 

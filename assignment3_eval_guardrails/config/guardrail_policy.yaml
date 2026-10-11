@@ -66,6 +66,11 @@ pii:
     - {name: PatientId, pattern: '\bPAT-[0-9]{5}\b', action: NONE}
     - {name: ClaimId, pattern: '\bCLM-[0-9]{4}-[0-9]{4}\b', action: NONE}
 
-contextual_grounding:   # output only, document route. Calibrated live (docs/spikes.md S3): correct golden answers
-  GROUNDING: 0.3        # score >= 0.43 grounding / 0.62 relevance; the red team's fabricated answers <= 0.12 grounding
-  RELEVANCE: 0.4        # (the echoed system prompt, OL6, grounds at 0.73 but has relevance 0.33)
+# Contextual grounding is DETECT-ONLY (action NONE): every document answer is scored and the scores are logged as
+# evidence, but Bedrock does not block on them. Live (docs/spikes.md S3), correct answers that say what the passages
+# do NOT contain scored as low as 0.19 grounding / 0.38 relevance, too close to fabricated answers (<= 0.12 / 0.33) for
+# a blocking threshold. Blocking for ungrounded claims is done by numeric grounding and the OpenEvals groundedness judge.
+contextual_grounding:   # output only, document route
+  action: NONE
+  GROUNDING: 0.3
+  RELEVANCE: 0.4
