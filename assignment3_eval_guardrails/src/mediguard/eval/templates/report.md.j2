@@ -1,0 +1,244 @@
+{% set m = s.manifest %}
+# MediBot evaluation report: **{{ s.verdict }}**
+
+Run `{{ s.run_id }}` · target **MediBot** `{{ m.medibot_commit }}` on `{{ m.target_model }}` · judge `{{ m.judge_model }}` (effort {{ m.judge_effort }}) · RAGAS evaluator `{{ m.ragas_model }}` · guardrails: rules + Bedrock `{{ m.bedrock_guardrail }}` + OpenEvals (`{{ m.guard_model }}`){% if not m.openevals %} **[OpenEvals disabled]**{% endif %}
+
+
+Dataset `{{ m.dataset_sha }}` ({{ s["items"]|length }} questions) · thresholds `{{ m.thresholds_sha }}` · git `{{ m.git_sha or "-" }}` · replay mode `{{ m.replay_mode }}`{% if m.fault %} · **injected fault: {{ m.fault }}**{% endif %}
+
+
+{% if s.verdict == "PASS" %}
+> **PASS**: every gate below met its threshold.
+{% else %}
+{% if s.state.aborted_at %}
+> **FAIL (fail fast)**: the run stopped at the **{{ s.state.aborted_at }}** gate before spending on RAGAS / the judge: {{ (s.state.abort_reason or [])|join("; ") }}
+>
+{% endif %}
+> **FAIL**: {{ s.gates|rejectattr("passed")|list|length }} gate(s) failed:
+{% for g in s.gates if not g.passed %}
+> - **{{ g.area }} / {{ g.name }}**: {{ g.value|fmt }} (threshold {{ g.threshold|fmt }}){% if g.detail %}. {{ g.detail }}{% endif %}
+
+
+{% endfor %}
+{% endif %}
+
+## Gates
+
+| Area | Gate | Value | Threshold | Result |
+|---|---|---|---|---|
+{% for g in s.gates %}
+| {{ g.area }} | {{ g.name }} | {{ g.value|fmt }} | {{ g.threshold|fmt }} | {{ "✅ pass" if g.passed else "❌ FAIL" }} |
+{% endfor %}
+
+## 1. Guardrails
+
+{% set G = s.guardrails %}
+Request outcomes: {% for k, v in G.statuses.items() %}`{{ k }}` {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
+
+
+| Stage | Check | Allow | Block |
+|---|---|---|---|
+{% for stage, checks in G.counts.items() %}
+{% for check, c in checks.items() %}
+| {{ stage }} | `{{ check }}` | {{ c.get("allow", 0) }} | {{ c.get("block", 0) }} |
+{% endfor %}
+{% endfor %}
+
+Block reasons: {% for r, n in G.reasons.items() %}`{{ r }}` ×{{ n }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}
+
+
+**Adversarial inputs** (must be blocked at the expected stage): {{ (G.adversarial_block_rate or 0) * 100 | round(0) }}% blocked
+
+| Item | Role | Attack | Blocked by | User sees |
+|---|---|---|---|---|
+{% for a in G.adversarial %}
+| {{ a.id }} {{ "✅" if a.ok else "❌" }} | {{ a.role }} | {{ a.question[:90] }} | {{ a.stage or "-" }}: `{{ a.reason or "-" }}` | {{ a.user_message[:70] }}… |
+{% endfor %}
+
+**Benign false blocks**: {% if G.benign_false_blocks %}{% for b in G.benign_false_blocks %}{{ b.id }} ({{ b.stage }}: `{{ b.reason }}`){% if not loop.last %}, {% endif %}{% endfor %}{% else %}none ({{ ((G.benign_false_block_rate or 0) * 100)|round(1) }}%){% endif %}
+
+
+**Fail-closed scenarios** (a misbehaving guardrail must block, never pass): {{ G.fail_closed|selectattr("ok")|list|length }}/{{ G.fail_closed|length }} blocked
+
+| # | Scenario | Internal reason | Generic refusal shown | Target called |
+|---|---|---|---|---|
+{% for f in G.fail_closed %}
+| {{ f.id }} {{ "✅" if f.ok else "❌" }} | {{ f.description }} | `{{ f.reason_code }}` | {{ "yes" if f.generic_refusal else "NO" }} | {{ "yes" if f.target_called else "no" }} |
+{% endfor %}
+
+{% if G.example_block %}
+{% set e = G.example_block %}
+### Example: a guardrail correctly blocking an unsafe request
+
+- **Item {{ e.id }}** ({{ e.role }}): "{{ e.question }}"
+- Per-layer input verdicts:
+{% for check, decision, reason in e.verdicts %}
+  - `{{ check }}`: **{{ decision }}** (`{{ reason }}`)
+{% endfor %}
+- What the user sees: "{{ e.user_message }}". The reason is never echoed; it is only in the trace and the event log.
+{% if e.run_url %}- Trace: {{ e.run_url }}
+{% endif %}
+{% endif %}
+
+## 2. Heuristic evals (deterministic, run first)
+
+{% set Hs = s.heuristics %}
+{% if Hs %}
+Index health (H0): {{ Hs.index_health.evidence }} · critical pass rate **{{ Hs.rate.critical|fmt }}** · standard pass rate **{{ Hs.rate.standard|fmt }}**
+
+| Check | Name | Severity | Pass | Fail | N/A |
+|---|---|---|---|---|---|
+{% for k, v in Hs.by_check.items() %}
+| {{ k }} | {{ v.name }} | {{ v.severity }} | {{ v.get("pass", 0) }} | {{ v.get("fail", 0) }} | {{ v.get("na", 0) }} |
+{% endfor %}
+
+{% if Hs.failures %}
+Failures on real responses:
+{% for f in Hs.failures %}
+- **{{ f.id }} / {{ f.check }}** ({{ f.severity }}): {{ f.evidence }}
+{% endfor %}
+{% else %}
+No heuristic failures on real responses.
+{% endif %}
+
+**Negative controls** (synthetic bad responses; each must fail exactly the listed checks): {{ Hs.controls|selectattr("ok")|list|length }}/{{ Hs.controls|length }} caught
+
+| Control | Bad response | Expected to fail | Actually failed |
+|---|---|---|---|
+{% for c in Hs.controls %}
+| {{ c.id }} {{ "✅" if c.ok else "❌" }} | {{ c.description }} | {{ c.expected_fail|join(", ") }} | {{ c.actual_fail|join(", ") }} |
+{% endfor %}
+
+{% if Hs.example_failure %}
+{% set x = Hs.example_failure %}
+### Example: a heuristic check correctly failing a bad response
+
+Control **{{ x.id }}** ({{ x.description }}): the answer `{{ x.answer }}` failed {{ x.actual_fail|join(", ") }}: {% for k, v in x.evidence.items() %}{{ k }}: {{ v }}{% if not loop.last %}; {% endif %}{% endfor %}.
+
+{% endif %}
+{% else %}
+Not run.
+{% endif %}
+
+## 3. RAGAS
+
+{% set agg = (s.ragas or {}).get("aggregates", {}) %}
+{% if agg %}
+Evaluator `{{ s.ragas.evaluator }}`, embeddings `{{ s.ragas.embeddings }}`.
+
+| Metric | Mean | Min | Scored | NaN | Threshold |
+|---|---|---|---|---|---|
+{% for k, v in agg.items() %}
+| {{ k }} | **{{ v.mean|fmt }}** | {{ v.min|fmt }} | {{ v.n }} | {{ v.nan }} | {{ th.ragas[k] }} |
+{% endfor %}
+
+| Item | Faithfulness | Answer relevancy | Context precision | Context recall |
+|---|---|---|---|---|
+{% for k, v in s.ragas.per_item.items() if "skipped" not in v %}
+| {{ k }} | {{ v.get("faithfulness")|fmt }} | {{ v.get("answer_relevancy")|fmt }} | {{ v.get("context_precision")|fmt }} | {{ v.get("context_recall")|fmt }} |
+{% endfor %}
+{% set unscored = s.ragas.per_item.items()|selectattr("1.skipped", "defined")|rejectattr("1.skipped", "equalto", "not a RAGAS item")|list %}
+{% if unscored %}
+
+Not scored: {% for k, v in unscored %}{{ k }} ({{ v.skipped }}){% if not loop.last %}, {% endif %}{% endfor %}.
+{% endif %}
+{% else %}
+Not run{% if s.state.aborted_at %} (the run stopped at **{{ s.state.aborted_at }}**){% endif %}.
+
+{% endif %}
+
+## 4. LLM-as-a-judge
+
+{% set J = s.judge %}
+{% if J %}
+Judge `{{ m.judge_model }}`, a different and stronger model than the target (`{{ m.target_model }}`). Pass rule (computed in code): accuracy ≥ 4, completeness ≥ 3, refusal appropriateness ≥ 4, overall ≥ 4, citation correctness ≥ 3 or N/A.
+
+Means: {% for k, v in J.means.items() %}{{ k }} **{{ v|fmt }}**{% if not loop.last %} · {% endif %}{% endfor %} · pass rate **{{ J.pass_rate|fmt }}**{% if J.fallbacks %} · ⚠ fallback judge used on {{ J.fallbacks|join(", ") }}{% endif %}
+
+
+**Calibration probes** (scripted answers; wrong-but-confident ones must fail):
+
+| Probe | Must | Acc / Comp / Overall | Judge passed | Caught | Why it's there | Errors the judge found |
+|---|---|---|---|---|---|---|
+{% for k, p in J.probes.items() %}
+| {{ k }} | {{ p.must }} | {% if p.scores %}{{ p.scores.accuracy.score }} / {{ p.scores.completeness.score }} / {{ p.scores.overall }}{% else %}error{% endif %} | {{ p.passed }} | {{ "✅" if p.caught else "❌" }} | {{ p.why }} | {{ (p.scores.key_errors|join("; ")) if p.scores else p.error }} |
+{% endfor %}
+
+| Item | Acc | Comp | Refusal | Cite | Overall | Pass | Verdict rationale |
+|---|---|---|---|---|---|---|---|
+{% for k, v in J["items"].items() %}
+{% if v.scores %}
+| {{ k }} | {{ v.scores.accuracy.score }} | {{ v.scores.completeness.score }} | {{ v.scores.refusal_appropriateness.score }} | {{ v.scores.citation_correctness.score or "n/a" }} | {{ v.scores.overall }} | {{ "✅" if v.passed else "❌" }} | {{ v.scores.verdict_rationale }} |
+{% else %}
+| {{ k }} | - | - | - | - | - | ❌ | judge error: {{ v.error }} (fails closed) |
+{% endif %}
+{% endfor %}
+
+<details><summary>Every justification (per item and criterion)</summary>
+
+{% for k, v in J["items"].items() if v.scores %}
+**{{ k }}** {{ "✅" if v.passed else "❌" }}
+- accuracy {{ v.scores.accuracy.score }}: {{ v.scores.accuracy.justification }}
+- completeness {{ v.scores.completeness.score }}: {{ v.scores.completeness.justification }}
+- refusal appropriateness {{ v.scores.refusal_appropriateness.score }}: {{ v.scores.refusal_appropriateness.justification }}
+- citation correctness {{ v.scores.citation_correctness.score or "n/a" }}: {{ v.scores.citation_correctness.justification }}
+{% if v.scores.key_errors %}- key errors: {{ v.scores.key_errors|join("; ") }}
+{% endif %}
+
+{% endfor %}
+</details>
+{% else %}
+Not run{% if s.state.aborted_at %} (the run stopped at **{{ s.state.aborted_at }}**){% endif %}.
+
+{% endif %}
+
+## 5. Latency, tokens and cost
+
+{% set P = s.performance %}
+| | Value |
+|---|---|
+| Requests | {{ P.requests }} |
+| Latency p50 / p95 (recorded) | {{ P.recorded_p50_ms|fmt }} / {{ P.recorded_p95_ms|fmt }} ms |
+| Latency p50 / p95 (this run, wall clock) | {{ P.wall_p50_ms|fmt }} / {{ P.wall_p95_ms|fmt }} ms |
+| Tokens in / out (requests) | {{ P.tokens_in }} / {{ P.tokens_out }} |
+| Request cost this run / cold equivalent | ${{ P.request_cost_usd }} / ${{ P.request_cold_cost_usd }} |
+| Evaluation cost (RAGAS + judge) this run / cold | ${{ P.eval_cost_usd }} / ${{ P.eval_cold_cost_usd }} |
+| Elapsed | {{ P.elapsed_s|fmt }} s |
+
+{% for k, v in P.by_component.items() %}
+- `{{ k }}`: {{ v.tokens_in }} in / {{ v.tokens_out }} out tokens, ${{ v.cost_usd }}
+{% endfor %}
+
+{% if s.consistency %}
+{% set C = s.consistency %}
+## 6. Repeatability ({{ C.a }} vs {{ C.b }})
+
+{{ "Identical results." if C.identical else ("Within tolerance (max |Δ| " ~ C.max_abs_delta ~ " ≤ " ~ C.tolerance ~ ")." if C.within_tolerance else "**Outside tolerance**: max |Δ| " ~ C.max_abs_delta ~ ".") }} Heuristic disagreements: {{ C.heuristic_disagreements|length }}; answers changed: {{ C.answers_changed|length }}.
+
+| Metric | Run A | Run B | Δ |
+|---|---|---|---|
+{% for d in C.metric_deltas %}
+| {{ d.metric }} | {{ d.a|fmt }} | {{ d.b|fmt }} | {{ d.delta|fmt }} |
+{% endfor %}
+{% endif %}
+
+{% if s.regression %}
+{% set R = s.regression %}
+## 7. Regression vs baseline (`{{ R.baseline_run }}`, target `{{ R.baseline_model }}`)
+
+| Metric | Baseline | Now | Δ | Max drop | Result |
+|---|---|---|---|---|---|
+{% for x in R.metrics %}
+| {{ x.metric }} | {{ x.baseline|fmt }} | {{ x.current|fmt }} | {{ x.delta|fmt }} | {{ x.max_drop }} | {{ "✅" if x.passed else "❌" }} |
+{% endfor %}
+
+{% if R.flipped %}Judge verdict changed on: {% for f in R.flipped %}{{ f.id }} ({{ "pass" if f.baseline else "fail" }}→{{ "not judged" if f.current is none else ("pass" if f.current else "fail") }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+{% endif %}
+
+## Appendix: every question
+
+| Item | Role | Expected | Outcome | Heuristics failed | Judge | Latency | Trace |
+|---|---|---|---|---|---|---|---|
+{% for i in s["items"] %}
+| {{ i.id }} | {{ i.role }} | {{ i.expected }} | {{ i.status }}{% if i.reason %} (`{{ i.reason }}`){% endif %} | {{ i.heuristics_failed|join(", ") or "-" }} | {{ "n/a" if i.judge_passed is none else ("✅" if i.judge_passed else "❌") }} | {{ i.latency_ms|fmt }} ms | {% if i.run_url %}[trace]({{ i.run_url }}){% else %}-{% endif %} |
+{% endfor %}

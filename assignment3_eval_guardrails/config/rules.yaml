@@ -1,0 +1,44 @@
+# Deterministic input rules (tier 0). Patterns run on NFKC-folded, casefolded text and on any decoded base64/hex.
+# Every rule blocks; the id becomes the internal reason code (input.rules.<id>). Never shown to users.
+max_chars: 2000
+
+injection:
+  - id: ignore_instructions
+    pattern: '\b(ignore|disregard|forget|override|bypass|skip)\b.{0,60}\b(instructions?|rules?|restrictions?|guardrails?|guidelines|access (?:rules|controls?|restrictions?)|role restrictions?|your prompt|polic(?:y|ies)|filters?|limitations?)\b'
+  - id: ignore_instructions_multilingual
+    pattern: '\b(ignora|ignorez|ignoriere|ignorar|olvida|oublie|vergiss)\b.{0,60}\b(instrucciones|instructions|anweisungen|reglas|règles|regeln|restricciones|restrictions)\b'
+  - id: mode_switch
+    pattern: '\b(you are now|from now on,? you|developer mode|admin mode|god mode|debug mode|maintenance mode|jailbreak|dan mode|do anything now|unrestricted mode|no restrictions)\b'
+  - id: role_play
+    pattern: '\b(act as|pretend (?:to be|you are|that)|roleplay as|role-play as|impersonate)\b|\bpretend\b.{0,60}\b(public|unrestricted|allowed|accessible|open to (?:all|everyone))\b'
+  - id: system_tag
+    pattern: '(^|[\s\[(])(system|developer)\s*:|\[/?inst\]|<\|im_start\|>|<\s*/?\s*(system|instructions?)\s*>|\brole\s*[:=]\s*[a-z_]+|\bsystem override\b'
+  - id: prompt_extraction
+    pattern: '\b(repeat|reveal|print|show|display|output|dump|leak|tell me|what (?:is|are)|give me)\b.{0,50}\b(system prompt|system message|your (?:instructions|prompt|rules|guidelines|configuration|context window)|hidden (?:instructions|prompt|rules)|initial prompt|everything in your context)\b'
+  - id: guardrail_probe
+    pattern: '\b(which|what) (?:exact )?(?:rule|filter|guardrail|policy|check|classifier)\b.{0,50}\b(block|flag|stop|trigger|catch|refuse)|\bwhy (?:was|did|is|were) (?:i|my (?:message|request|question)|this|it)\b.{0,40}\b(blocked|refused|flagged|denied|rejected)|\b(bypass|get around|evade|circumvent|rephrase .{0,20} (?:to|so) (?:it )?(?:gets|get) through)\b.{0,40}\b(filter|guardrail|block|restriction|rbac|access|through)'
+  - id: authority_claim
+    pattern: '\b(dr\.?|doctor|the cmo|my manager|hod|admin)\s+\w*\s*(approved|signed off|authori[sz]ed|said i can|gave me permission)\b'
+
+raw_sql:
+  id: raw_sql
+  pattern: '\bselect\s+(?:\*|distinct\b|[a-z_][\w.]*\s*(?:,|\bfrom\b))[\s\S]{0,300}?\bfrom\s+[a-z_]+|\b(insert\s+into|update\s+[a-z_]+\s+set|delete\s+from|drop\s+table|alter\s+table|union\s+(?:all\s+)?select|pragma\s+\w+|attach\s+database)\b|;\s*--'
+
+role_claim:
+  id: role_claim
+  pattern: '\b(?:i am|i''m|im|i am actually|as (?:an?|the)|my role is|logged in as|acting as|on behalf of (?:an?|the)|speaking as (?:an?|the)|this is (?:an?|the))\s+(?:actually\s+|really\s+|now\s+|currently\s+|today\s+)?(?:an?\s+|the\s+)?(?P<role>[a-z][a-z .\-]{1,40}?)(?=[\s,.;:!?)]|$)'
+  synonyms:
+    admin: [admin, administrator, the admin, sysadmin, superuser, root, cmo, chief medical officer, hod, head of department, it admin, system administrator, hospital administrator, medical director, nurse manager]
+    doctor: [doctor, physician, consultant, surgeon, intensivist, resident, senior doctor, attending]
+    nurse: [nurse, staff nurse, icu nurse, charge nurse, registered nurse]
+    billing_executive: [billing executive, billing exec, billing officer, billing staff, billing team, billing manager, insurance desk]
+    technician: [technician, biomedical engineer, biomedical technician, equipment technician, tech]
+
+# Output rules (tier 0) besides the leak detector and numeric grounding.
+pii_block:
+  aadhaar: '\b[2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4}\b'
+  pan: '\b[a-z]{5}\d{4}[a-z]\b'
+  card: '\b(?:\d[ -]?){13,19}\b'
+
+# Vocabulary that must never appear in a user-facing answer (internals, reason codes, guardrail names).
+internal_terms: [guardrail, fail_closed, reason_code, prompt_attack, roleescalation, systeminternals, patientdataexfiltration, billingfraudcoaching, personalselfmedication, nonworkmisuse, input.rules, output.rules, bedrock, openevals, denied topic]

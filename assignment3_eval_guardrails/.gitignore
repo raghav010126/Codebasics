@@ -1,0 +1,25 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[oc]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# local run artifacts (runs, logs and caches live under ~/.cache/mediguard)
+runs/
+.DS_Store
+~$*
+
+# editor and unrelated tool folders
+.sf/
+.sfdx/
+.vscode/
+.idea/

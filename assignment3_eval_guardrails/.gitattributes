@@ -1,0 +1,2 @@
+# MediBot is copied byte-for-byte (tests/test_target_pristine.py checks hashes): never convert line endings
+target/medibot/** -text

@@ -1,0 +1,93 @@
+{% set m = s.manifest %}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>MediBot evaluation {{ s.run_id }}: {{ s.verdict }}</title>
+<style>
+:root{--ok:#1a7f37;--bad:#cf222e;--mut:#57606a;--bd:#d0d7de;--bg:#f6f8fa}
+body{font:14px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:1180px;margin:24px auto;padding:0 16px;color:#1f2328}
+h1{font-size:24px}h2{font-size:18px;margin-top:32px;border-bottom:1px solid var(--bd);padding-bottom:4px}
+.banner{padding:14px 16px;border-radius:6px;font-weight:600;margin:12px 0}
+.PASS{background:#dafbe1;color:var(--ok);border:1px solid #aceebb}.FAIL{background:#ffebe9;color:var(--bad);border:1px solid #ffcecb}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px}th,td{border:1px solid var(--bd);padding:4px 8px;text-align:left;vertical-align:top}
+th{background:var(--bg)}td.ok{color:var(--ok);font-weight:600}td.bad{color:var(--bad);font-weight:600}
+.meta{color:var(--mut)}code{background:var(--bg);padding:1px 4px;border-radius:4px;font-size:12px}
+.small{font-size:12px;color:var(--mut)}
+</style></head><body>
+<h1>MediBot evaluation report</h1>
+<p class="meta">Run <code>{{ s.run_id }}</code> · MediBot <code>{{ m.medibot_commit }}</code> on <code>{{ m.target_model }}</code> ·
+judge <code>{{ m.judge_model }}</code> · RAGAS evaluator <code>{{ m.ragas_model }}</code> · guardrails: rules + Bedrock <code>{{ m.bedrock_guardrail }}</code> + OpenEvals <code>{{ m.guard_model }}</code>
+{% if m.fault %}· <b>injected fault: {{ m.fault }}</b>{% endif %}</p>
+<div class="banner {{ s.verdict }}">{{ s.verdict }}{% if s.verdict == "FAIL" %}: failed gates:
+{% for g in s.gates if not g.passed %}{{ g.area }} / {{ g.name }} ({{ g.value|fmt }} vs {{ g.threshold|fmt }}){% if not loop.last %}; {% endif %}{% endfor %}{% else %}: every gate met its threshold{% endif %}</div>
+
+<h2>Gates</h2>
+<table><tr><th>Area</th><th>Gate</th><th>Value</th><th>Threshold</th><th>Result</th><th>Detail</th></tr>
+{% for g in s.gates %}<tr><td>{{ g.area }}</td><td>{{ g.name }}</td><td>{{ g.value|fmt }}</td><td>{{ g.threshold|fmt }}</td>
+<td class="{{ 'ok' if g.passed else 'bad' }}">{{ "pass" if g.passed else "FAIL" }}</td><td class="small">{{ g.detail }}</td></tr>{% endfor %}
+</table>
+
+{% set G = s.guardrails %}
+<h2>1. Guardrails</h2>
+<p>Outcomes: {% for k, v in G.statuses.items() %}<code>{{ k }}</code> {{ v }} {% endfor %}</p>
+<table><tr><th>Stage</th><th>Check</th><th>Allow</th><th>Block</th></tr>
+{% for stage, checks in G.counts.items() %}{% for check, c in checks.items() %}<tr><td>{{ stage }}</td><td><code>{{ check }}</code></td><td>{{ c.get("allow", 0) }}</td><td>{{ c.get("block", 0) }}</td></tr>{% endfor %}{% endfor %}
+</table>
+<table><tr><th>Item</th><th>Role</th><th>Attack</th><th>Blocked by</th><th>User sees</th></tr>
+{% for a in G.adversarial %}<tr><td class="{{ 'ok' if a.ok else 'bad' }}">{{ a.id }}</td><td>{{ a.role }}</td><td>{{ a.question }}</td><td>{{ a.stage or "-" }}: <code>{{ a.reason or "-" }}</code></td><td class="small">{{ a.user_message }}</td></tr>{% endfor %}
+</table>
+<p>Benign false blocks: {% for b in G.benign_false_blocks %}{{ b.id }} (<code>{{ b.reason }}</code>) {% else %}none{% endfor %}</p>
+<table><tr><th>Fail-closed scenario</th><th>Internal reason</th><th>Generic refusal</th><th>Target called</th></tr>
+{% for f in G.fail_closed %}<tr><td class="{{ 'ok' if f.ok else 'bad' }}">{{ f.id }}: {{ f.description }}</td><td><code>{{ f.reason_code }}</code></td><td>{{ f.generic_refusal }}</td><td>{{ f.target_called }}</td></tr>{% endfor %}
+</table>
+{% if G.example_block %}{% set e = G.example_block %}
+<h3>Example: guardrail blocking an unsafe request</h3>
+<p><b>{{ e.id }}</b> ({{ e.role }}): "{{ e.question }}"</p><ul>{% for check, decision, reason in e.verdicts %}<li><code>{{ check }}</code>: <b>{{ decision }}</b> (<code>{{ reason }}</code>)</li>{% endfor %}</ul>
+<p>User sees: "{{ e.user_message }}"{% if e.run_url %} · <a href="{{ e.run_url }}">trace</a>{% endif %}</p>{% endif %}
+
+{% set Hs = s.heuristics %}
+<h2>2. Heuristic evals</h2>
+{% if Hs %}<p>Index health: {{ Hs.index_health.evidence }}</p>
+<table><tr><th>Check</th><th>Name</th><th>Severity</th><th>Pass</th><th>Fail</th><th>N/A</th></tr>
+{% for k, v in Hs.by_check.items() %}<tr><td>{{ k }}</td><td>{{ v.name }}</td><td>{{ v.severity }}</td><td>{{ v.get("pass", 0) }}</td><td class="{{ 'bad' if v.get('fail') }}">{{ v.get("fail", 0) }}</td><td>{{ v.get("na", 0) }}</td></tr>{% endfor %}
+</table>
+{% for f in Hs.failures %}<p class="small">{{ f.id }} / {{ f.check }} ({{ f.severity }}): {{ f.evidence }}</p>{% endfor %}
+<table><tr><th>Control</th><th>Bad response</th><th>Expected to fail</th><th>Failed</th></tr>
+{% for c in Hs.controls %}<tr><td class="{{ 'ok' if c.ok else 'bad' }}">{{ c.id }}</td><td>{{ c.description }}</td><td>{{ c.expected_fail|join(", ") }}</td><td>{{ c.actual_fail|join(", ") }}</td></tr>{% endfor %}
+</table>
+{% if Hs.example_failure %}{% set x = Hs.example_failure %}<h3>Example: heuristic failing a bad response</h3>
+<p>{{ x.id }} ({{ x.description }}): <code>{{ x.answer }}</code> failed {{ x.actual_fail|join(", ") }}: {% for k, v in x.evidence.items() %}{{ k }}: {{ v }} {% endfor %}</p>{% endif %}
+{% else %}<p>Not run.</p>{% endif %}
+
+<h2>3. RAGAS</h2>
+{% set agg = (s.ragas or {}).get("aggregates", {}) %}
+{% if agg %}<table><tr><th>Metric</th><th>Mean</th><th>Min</th><th>Scored</th><th>NaN</th><th>Threshold</th></tr>
+{% for k, v in agg.items() %}<tr><td>{{ k }}</td><td class="{{ 'ok' if v.mean is not none and v.mean >= th.ragas[k] else 'bad' }}">{{ v.mean|fmt }}</td><td>{{ v.min|fmt }}</td><td>{{ v.n }}</td><td>{{ v.nan }}</td><td>{{ th.ragas[k] }}</td></tr>{% endfor %}</table>
+<table><tr><th>Item</th><th>Faithfulness</th><th>Answer relevancy</th><th>Context precision</th><th>Context recall</th></tr>
+{% for k, v in s.ragas.per_item.items() if "skipped" not in v %}<tr><td>{{ k }}</td><td>{{ v.get("faithfulness")|fmt }}</td><td>{{ v.get("answer_relevancy")|fmt }}</td><td>{{ v.get("context_precision")|fmt }}</td><td>{{ v.get("context_recall")|fmt }}</td></tr>{% endfor %}</table>
+{% set unscored = s.ragas.per_item.items()|selectattr("1.skipped", "defined")|rejectattr("1.skipped", "equalto", "not a RAGAS item")|list %}{% if unscored %}<p class="small">Not scored: {% for k, v in unscored %}{{ k }} ({{ v.skipped }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+{% else %}<p>Not run{% if s.state.aborted_at %} (stopped at {{ s.state.aborted_at }}){% endif %}.</p>{% endif %}
+
+<h2>4. LLM-as-a-judge</h2>
+{% set J = s.judge %}
+{% if J %}<p>Judge <code>{{ m.judge_model }}</code> grading target <code>{{ m.target_model }}</code>. Means: {% for k, v in J.means.items() %}{{ k }} <b>{{ v|fmt }}</b> {% endfor %} · pass rate <b>{{ J.pass_rate|fmt }}</b></p>
+<table><tr><th>Probe</th><th>Must</th><th>Acc / Comp / Overall</th><th>Judge passed</th><th>Caught</th><th>Why</th><th>Errors the judge found</th></tr>
+{% for k, p in J.probes.items() %}<tr><td>{{ k }}</td><td>{{ p.must }}</td><td>{% if p.scores %}{{ p.scores.accuracy.score }} / {{ p.scores.completeness.score }} / {{ p.scores.overall }}{% else %}error{% endif %}</td><td>{{ p.passed }}</td><td class="{{ 'ok' if p.caught else 'bad' }}">{{ p.caught }}</td><td>{{ p.why }}</td><td class="small">{{ (p.scores.key_errors|join("; ")) if p.scores else p.error }}</td></tr>{% endfor %}</table>
+<table><tr><th>Item</th><th>Acc</th><th>Comp</th><th>Refusal</th><th>Cite</th><th>Overall</th><th>Pass</th><th>Justifications</th></tr>
+{% for k, v in J["items"].items() %}{% if v.scores %}<tr><td>{{ k }}</td><td>{{ v.scores.accuracy.score }}</td><td>{{ v.scores.completeness.score }}</td><td>{{ v.scores.refusal_appropriateness.score }}</td><td>{{ v.scores.citation_correctness.score or "n/a" }}</td><td>{{ v.scores.overall }}</td><td class="{{ 'ok' if v.passed else 'bad' }}">{{ v.passed }}</td><td class="small"><b>{{ v.scores.verdict_rationale }}</b><details><summary>per criterion</summary>accuracy: {{ v.scores.accuracy.justification }}<br>completeness: {{ v.scores.completeness.justification }}<br>refusal: {{ v.scores.refusal_appropriateness.justification }}<br>citations: {{ v.scores.citation_correctness.justification }}{% if v.scores.key_errors %}<br>key errors: {{ v.scores.key_errors|join("; ") }}{% endif %}</details></td></tr>
+{% else %}<tr><td>{{ k }}</td><td colspan="5">judge error: {{ v.error }}</td><td class="bad">False</td><td></td></tr>{% endif %}{% endfor %}</table>
+{% else %}<p>Not run{% if s.state.aborted_at %} (stopped at {{ s.state.aborted_at }}){% endif %}.</p>{% endif %}
+
+{% set P = s.performance %}
+<h2>5. Latency, tokens and cost</h2>
+<table><tr><th>Requests</th><th>p50 / p95 recorded</th><th>p50 / p95 wall</th><th>Tokens in / out</th><th>Request cost (cold)</th><th>Eval cost (cold)</th></tr>
+<tr><td>{{ P.requests }}</td><td>{{ P.recorded_p50_ms|fmt }} / {{ P.recorded_p95_ms|fmt }} ms</td><td>{{ P.wall_p50_ms|fmt }} / {{ P.wall_p95_ms|fmt }} ms</td><td>{{ P.tokens_in }} / {{ P.tokens_out }}</td><td>${{ P.request_cost_usd }} (${{ P.request_cold_cost_usd }})</td><td>${{ P.eval_cost_usd }} (${{ P.eval_cold_cost_usd }})</td></tr></table>
+
+{% if s.consistency %}{% set C = s.consistency %}<h2>6. Repeatability</h2>
+<p>{{ C.a }} vs {{ C.b }}: {{ "identical" if C.identical else ("within tolerance" if C.within_tolerance else "OUTSIDE tolerance") }} (max |Δ| {{ C.max_abs_delta }})</p>{% endif %}
+{% if s.regression %}{% set R = s.regression %}<h2>7. Regression vs baseline</h2>
+<table><tr><th>Metric</th><th>Baseline</th><th>Now</th><th>Δ</th><th>Result</th></tr>
+{% for x in R.metrics %}<tr><td>{{ x.metric }}</td><td>{{ x.baseline|fmt }}</td><td>{{ x.current|fmt }}</td><td>{{ x.delta|fmt }}</td><td class="{{ 'ok' if x.passed else 'bad' }}">{{ x.passed }}</td></tr>{% endfor %}</table>{% endif %}
+
+<h2>Appendix: every question</h2>
+<table><tr><th>Item</th><th>Role</th><th>Question</th><th>Expected</th><th>Outcome</th><th>Heuristics failed</th><th>Judge</th><th>Trace</th></tr>
+{% for i in s["items"] %}<tr><td>{{ i.id }}</td><td>{{ i.role }}</td><td class="small">{{ i.question }}</td><td>{{ i.expected }}</td><td>{{ i.status }}{% if i.reason %}<br><code>{{ i.reason }}</code>{% endif %}</td><td>{{ i.heuristics_failed|join(", ") or "-" }}</td><td>{{ "n/a" if i.judge_passed is none else i.judge_passed }}</td><td>{% if i.run_url %}<a href="{{ i.run_url }}">trace</a>{% endif %}</td></tr>{% endfor %}
+</table>
+</body></html>
